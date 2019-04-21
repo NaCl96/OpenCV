@@ -8,7 +8,7 @@
 #include <opencv2\xfeatures2d.hpp>
 #include "watershed.h"
 #include <opencv2\features2d\features2d.hpp>
-#include "laplacianZC.h"
+//#include "laplacianZC.h"
 #include"edgedetector.h"
 #include "harrisDetector.h"
 using namespace std;
@@ -83,153 +83,120 @@ void sharpen(const Mat &image, Mat &result) {
 }
 
 int main() {
-	//const int64 start = getTickCount();
-	Mat image1 = imread("d:/image/images/road.jpg",0);
-	Mat image2 = imread("d:/image/images/rain.jpg",0);
-	if (!image1.data) {
-		return  0;
-	}
-	if (!image2.data) {
-		return 0;
-	}
 	
-	
-	cv::Mat image = cv::imread("d:/image/images/church01.jpg", 0);
-	if (!image.data) {
-		return 0;
+	cv::Mat image1 = cv::imread("d:/image/images/church01.jpg");
+	cv::Mat image2 = cv::imread("d:/image/images/church02.jpg");
+	if (image1.empty()) {
+		cerr <<" 图像读取失败" << endl;
 	}
+	std::vector<cv::KeyPoint> keypoints1;
+	std::vector<cv::KeyPoint> keypoints2;
+	cv::Ptr<cv::FeatureDetector> ptrDetector; //泛型检测器指针
+	ptrDetector = cv::FastFeatureDetector::create(80);
 
+	//检测关键点
+	ptrDetector->detect(image1, keypoints1);
+	ptrDetector->detect(image2, keypoints2);
 
-	cv::transpose(image, image);
-	cv::flip(image, image, 0);
+	//定义正方形的邻域
+	const int nsize(11); //尺寸
+	cv::Rect neighborhood(0, 0, nsize, nsize);
+	cv::Mat patch1;
+	cv::Mat patch2;
 
-	std::vector<cv::KeyPoint> keypoints;
-	cv::Ptr<cv::GFTTDetector> ptrGFTT = cv::GFTTDetector::create(500, 0.01, 10);
-	ptrGFTT->detect(image, keypoints);
+	cv::Mat result;
+	std::vector<cv::DMatch> matches;
 
-	std::vector<cv::KeyPoint>::const_iterator it = keypoints.begin();
-	while (it != keypoints.end()) {
-		cv::circle(image, it->pt, 3, cv::Scalar(255, 255, 255), 1);
-		++it;
-	}
-	// Display the keypoints
-	cv::namedWindow("GFTT");
-	cv::imshow("GFTT", image);
+	for (int i = 0; i < keypoints1.size(); i++) {
+		neighborhood.x = keypoints1[i].pt.x - nsize / 2;
+		neighborhood.y = keypoints1[i].pt.y - nsize / 2;
+		if (neighborhood.x<0 || neighborhood.y<0 || neighborhood.x + nsize>image1.cols || neighborhood.y + nsize>image1.rows) {
+			continue;
+		}
+		patch1 = image1(neighborhood);
+		cv::DMatch bestMatch;
 
-	// Read input image
-	image = cv::imread("d:/image/images/church01.jpg", 0);
-	// rotate the image (to produce a horizontal image)
-	cv::transpose(image, image);
-	cv::flip(image, image, 0);
+		//for all keypoints in image 2
+		for (int j = 0; j<keypoints2.size(); j++) {
 
-	// draw the keypoints
-	cv::drawKeypoints(image,		// original image
-		keypoints,					// vector of keypoints
-		image,						// the resulting image
-		cv::Scalar(255, 255, 255),	// color of the points
-		cv::DrawMatchesFlags::DRAW_OVER_OUTIMG); //drawing flag
+			// define image patch
+			neighborhood.x = keypoints2[j].pt.x - nsize / 2;
+			neighborhood.y = keypoints2[j].pt.y - nsize / 2;
 
-												 // Display the keypoints
-	cv::namedWindow("Good Features to Track Detector");
-	cv::imshow("Good Features to Track Detector", image);
+			// if neighborhood of points outside image, then continue with next point
+			if (neighborhood.x<0 || neighborhood.y<0 ||
+				neighborhood.x + nsize >= image2.cols || neighborhood.y + nsize >= image2.rows)
+				continue;
 
-	image = cv::imread("d:/image/images/church01.jpg",0);
-	cv::transpose(image, image);
-	cv::flip(image, image, 0);
-	keypoints.clear();
+			// patch in image 2
+			patch2 = image2(neighborhood);
 
-	cv::Ptr<cv::FastFeatureDetector> ptrFAST = cv::FastFeatureDetector::create(40);
-	ptrFAST->detect(image, keypoints);
-	cv::drawKeypoints(image, keypoints, image, cv::Scalar(255, 255, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG);
-	std::cout << "Number of keypoints (FAST): " << keypoints.size() << std::endl;
+			// match the two patches
+			cv::matchTemplate(patch1, patch2, result, cv::TM_SQDIFF);
 
-	cv::namedWindow("FAST");
-	cv::imshow("FAST",image);
+			// check if it is a best match
+			if (result.at<float>(0, 0) < bestMatch.distance) {
 
-	// FAST feature without non-max suppression
-	// Read input image
-	image = cv::imread("d:/image/images/church01.jpg", 0);
-	// rotate the image (to produce a horizontal image)
-	cv::transpose(image, image);
-	cv::flip(image, image, 0);
-
-	keypoints.clear();
-	// detect the keypoints
-	ptrFAST->setNonmaxSuppression(false);
-
-	ptrFAST->detect(image, keypoints);
-	// draw the keypoints
-	cv::drawKeypoints(image, keypoints, image, cv::Scalar(255, 255, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG);
-
-	// Display the keypoints
-	cv::namedWindow("FAST Features (all)");
-	cv::imshow("FAST Features (all)", image);
-
-	image = cv::imread("d:/image/images/church01.jpg",0);
-	cv::transpose(image, image);
-	cv::flip(image, image, 0);
-
-	//keypoints.clear();
-	int total(100);
-	int hstep(5), vstep(3);
-	int hsize(image.cols / hstep), vsize(image.rows / vstep);
-	int subtotal(total / (hstep*vstep));
-	cv::Mat imageROI;
-	std::vector<cv::KeyPoint> gridpoints;
-	std::cout << "Grid of " << vstep << " by " << hstep << " each of size " << vsize << " by " << hsize << std::endl;
-
-	ptrFAST->setThreshold(20);
-	ptrFAST->setNonmaxSuppression(true);
-	keypoints.clear();
-
-	for (int i = 0; i < vstep; i++) {
-		for (int j = 0; j < hstep; j++) {
-			imageROI = image(cv::Rect(j*hsize, i*vsize, hsize,vsize));
-			gridpoints.clear();
-			ptrFAST->detect(imageROI, gridpoints);
-			std::cout << "Number of FAST in grid " << i << "," << j << ": " << gridpoints.size() << std::endl;
-			if (gridpoints.size() > subtotal) {
-				for (auto it = gridpoints.begin(); it != gridpoints.begin() + subtotal; ++it) {
-				}
-			}
-			auto itEnd(gridpoints.end()); 
-			if (gridpoints.size() > subtotal) {
-				nth_element(gridpoints.begin(), gridpoints.begin() + subtotal, gridpoints.end(),
-					[](cv::KeyPoint& a, cv::KeyPoint& b) {return a.response > b.response; });
-				itEnd = gridpoints.begin() + subtotal;
-
-			}
-
-			for (auto it = gridpoints.begin(); it != itEnd; ++it) {
-				it->pt += cv::Point2f(j*hsize, i*vsize); // convert to image coordinates
-				keypoints.push_back(*it);
-				std::cout << "  " << it->response << std::endl;
+				bestMatch.distance = result.at<float>(0, 0);
+				bestMatch.queryIdx = i;
+				bestMatch.trainIdx = j;
 			}
 		}
+		// add the best match
+		matches.push_back(bestMatch);
 	}
-	
-	cv::drawKeypoints(image, keypoints, image, cv::Scalar(255, 255, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG);
-	// Display the keypoints
-	cv::namedWindow("FAST Features (grid)");
-	cv::imshow("FAST Features (grid)", image);
+	std::cout << "Number of matches: " << matches.size() << std::endl;
 
-	image = cv::imread("d:/image/images/church01.jpg", 0);
-	cv::transpose(image, image);
-	cv::flip(image, image,0);
+	// extract the 50 best matches
+	std::nth_element(matches.begin(), matches.begin() + 50, matches.end());
+	matches.erase(matches.begin() + 50, matches.end());
 
-	keypoints.clear();
-	cv::Ptr<cv::xfeatures2d::SurfFeatureDetector> ptrSURF = cv::xfeatures2d::SurfFeatureDetector::create(2000.0);
-	ptrSURF->detect(image, keypoints);
+	std::cout << "Number of matches (after): " << matches.size() << std::endl;
 
-	ptrSURF->detect(image, keypoints);
+	// Draw the matching results
+	cv::Mat matchImage;
+	cv::drawMatches(image1, keypoints1, // first image
+		image2, keypoints2, // second image
+		matches,     // vector of matches
+		matchImage,  // produced image
+		cv::Scalar(255, 255, 255),  // line color
+		cv::Scalar(255, 255, 255)); // point color
 
-	cv::Mat featureImage;
-	cv::drawKeypoints(image, keypoints, featureImage, cv::Scalar(255, 255, 255), cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+									// Display the image of matches
+	cv::namedWindow("Matches");
+	cv::imshow("Matches", matchImage);
 
-	cv::namedWindow("SURF");
-	cv::imshow("SURF", featureImage);
-	std::cout << "Number of SURF keypoints:" << keypoints.size() << std::endl;
 
+	// define a template
+	cv::Mat target(image1, cv::Rect(80, 105, 30, 30));
+	// Display the template
+	cv::namedWindow("Template");
+	cv::imshow("Template", target);
+
+	// define search region
+	cv::Mat roi(image2,
+		// here top half of the image
+		cv::Rect(0, 0, image2.cols, image2.rows / 2));
+
+	// perform template matching
+	cv::matchTemplate(
+		roi,    // search region
+		target, // template
+		result, // result
+		CV_TM_SQDIFF); // similarity measure
+
+					   // find most similar location
+	double minVal, maxVal;
+	cv::Point minPt, maxPt;
+	cv::minMaxLoc(result, &minVal, &maxVal, &minPt, &maxPt);
+
+	// draw rectangle at most similar location
+	// at minPt in this case
+	cv::rectangle(roi, cv::Rect(minPt.x, minPt.y, target.cols, target.rows), 255);
+
+	// Display the template
+	cv::namedWindow("Best");
+	cv::imshow("Best", image2);
 
 
 	waitKey(0);
